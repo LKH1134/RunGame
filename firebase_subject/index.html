@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RUNGAME — 횡스크롤 러너</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230e1220'/><rect x='11' y='6' width='10' height='15' rx='3' fill='%234de0c8'/><rect x='11' y='22' width='4' height='5' fill='%232fae9c'/><rect x='17' y='22' width='4' height='5' fill='%232fae9c'/></svg>" />
+  <link rel="stylesheet" href="./styles/main.css" />
+</head>
+<body>
+  <main id="app">
+
+    <!-- ── MENU ───────────────────────────────────────────── -->
+    <section id="screen-menu" class="screen is-active">
+      <div class="menu-card">
+        <h1 class="title">RUN<span>GAME</span></h1>
+        <p class="subtitle">
+          <kbd>Space</kbd> 점프 · <kbd>Shift</kbd> 슬라이딩
+        </p>
+        <div class="menu-buttons">
+          <button id="btn-play" class="btn btn-primary">게임 시작</button>
+          <button id="btn-leaderboard" class="btn">리더보드</button>
+          <button id="btn-auth" class="btn">로그인</button>
+        </div>
+        <p id="menu-user" class="menu-user" hidden></p>
+      </div>
+    </section>
+
+    <!-- ── GAME ───────────────────────────────────────────── -->
+    <section id="screen-game" class="screen">
+      <div class="stage">
+        <canvas id="canvas" width="960" height="540"></canvas>
+
+        <div class="hud">
+          <div class="hud-item">
+            <span class="hud-label">거리</span>
+            <span><b id="hud-meters">0</b>m</span>
+          </div>
+          <div class="hud-item">
+            <span class="hud-label">동전</span>
+            <span><b id="hud-coins">0</b></span>
+          </div>
+          <div class="hud-item hud-score">
+            <span class="hud-label">점수</span>
+            <span><b id="hud-score">0</b></span>
+          </div>
+        </div>
+
+        <div id="countdown" class="countdown" hidden>
+          <span id="countdown-text">3</span>
+        </div>
+
+        <div id="paused" class="overlay" hidden>
+          <div class="panel panel-slim">
+            <p class="panel-label">일시정지</p>
+            <p class="panel-note">아무 키나 누르거나 화면을 클릭하면 계속합니다.</p>
+          </div>
+        </div>
+
+        <div id="result" class="overlay" hidden>
+          <div class="panel">
+            <p class="panel-label">최종 점수</p>
+            <p id="result-score" class="result-score">0</p>
+            <p id="result-breakdown" class="result-breakdown"></p>
+            <p id="result-best" class="result-best" hidden></p>
+            <p id="result-save" class="result-save"></p>
+            <div class="panel-buttons">
+              <button id="result-retry" class="btn btn-primary">다시하기</button>
+              <button id="result-board" class="btn">리더보드</button>
+              <button id="result-menu" class="btn">메인으로</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── LEADERBOARD ────────────────────────────────────── -->
+    <section id="screen-leaderboard" class="screen">
+      <div class="board-card">
+        <header class="board-head">
+          <h2>리더보드</h2>
+          <button id="lb-back" class="btn btn-ghost">← 돌아가기</button>
+        </header>
+
+        <p id="lb-status" class="lb-status" hidden></p>
+        <button id="lb-retry" class="btn lb-retry" hidden>다시 시도</button>
+
+        <div class="lb-scroll">
+          <table id="lb-table" class="lb-table" hidden>
+            <thead>
+              <tr>
+                <th class="rank">순위</th>
+                <th>아이디</th>
+                <th class="num">점수</th>
+                <th class="num">거리</th>
+                <th class="num">동전</th>
+              </tr>
+            </thead>
+            <tbody id="lb-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── AUTH MODAL ───────────────────────────────────────── -->
+  <div id="auth-modal" class="modal" hidden>
+    <div id="auth-backdrop" class="modal-backdrop"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-label="계정">
+      <button id="auth-close" class="modal-close" aria-label="닫기">×</button>
+
+      <div class="tabs">
+        <button id="auth-tab-signin" type="button" class="tab is-active">로그인</button>
+        <button id="auth-tab-signup" type="button" class="tab">회원가입</button>
+      </div>
+
+      <form id="auth-form" novalidate>
+        <label class="field">
+          <span>아이디</span>
+          <input id="auth-id" type="text" maxlength="20" autocomplete="username" />
+        </label>
+        <p id="auth-hint" class="hint"></p>
+
+        <label class="field">
+          <span>비밀번호</span>
+          <input id="auth-pw" type="password" autocomplete="current-password" />
+        </label>
+
+        <p id="auth-error" class="error" hidden></p>
+        <button id="auth-submit" class="btn btn-primary btn-block" type="submit">로그인</button>
+      </form>
+
+      <p class="modal-note">
+        ※ 계정과 기록이 아직 이 브라우저에만 저장됩니다. (Firebase 연결 예정)
+      </p>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

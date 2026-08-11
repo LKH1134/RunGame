@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// 아직 배포하지 않았다. Firestore 생성 후
+//   firebase deploy --only firestore:rules
+// 또는 콘솔의 규칙 편집기에 붙여넣어 적용한다.
+//
+// ── 치팅에 대한 한계 (솔직하게) ──────────────────────────
+// 점수를 클라이언트가 계산해 전송하는 구조라, 개발자 도구로 임의의 점수를
+// 올리는 것은 규칙만으로 막을 수 없다. 여기서는 (a) 점수 상한 검사,
+// (b) 거리·동전의 정합성 검사까지가 현실적인 범위다.
+// 완전한 방어는 Cloud Functions에서 리플레이 입력을 검증해야 하며,
+// 이는 이 과제의 범위 밖으로 둔다.
+
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    match /users/{uid} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // 랭킹 조회의 단일 소스. 유저당 1행이라
+    // orderBy(bestScore, desc).limit(100) 단일 쿼리로 끝난다.
+    match /leaderboard/{uid} {
+      allow read: if true;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.data.bestScore is number
+                   && request.resource.data.bestScore >= 0
+                   && request.resource.data.bestScore <= 1000000
+                   && request.resource.data.meters is number
+                   && request.resource.data.coins is number
+                   && request.resource.data.meters >= 0
+                   && request.resource.data.coins >= 0
+                   // 점수 = 거리 + 동전×10 이 맞는지 확인
+                   && request.resource.data.bestScore ==
+                      request.resource.data.meters + request.resource.data.coins * 10;
+    }
+
+    // 전체 플레이 이력. 리더보드에는 불필요하며 "내 기록" 화면용이다.
+    match /scores/{id} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;   // 이력은 불변
+    }
+  }
+}
