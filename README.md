@@ -41,22 +41,43 @@ npm run dev          # http://127.0.0.1:8787
 
 ## 배포
 
-Cloudflare 계정 인증이 필요한 단계다.
+브랜치에 push하면 `.github/workflows/deploy.yml`이 알아서 배포한다.
+수동 조작이 필요한 단계는 없다.
 
-```bash
-npx wrangler login                      # 브라우저 OAuth
-npx wrangler d1 create rungame          # 출력된 database_id를 wrangler.jsonc에 붙여넣는다
-npm run db:remote                       # 원격 D1에 스키마 적용
-npx wrangler secret put SESSION_SECRET  # 임의의 긴 랜덤 문자열
-npm run deploy
-```
+필요한 저장소 Actions 시크릿은 두 개다.
 
-> **`SESSION_SECRET`은 배포 전에 반드시 설정해야 한다.** 없으면 Worker가
-> 개발용 기본값으로 폴백하는데, 그 값은 이 저장소에 적혀 있으므로
-> 누구나 세션을 위조할 수 있다. 설정되지 않으면 로그에 경고가 남는다.
+| 시크릿 | 용도 |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Workers·D1 편집 권한이 있는 토큰 |
+| `CLOUDFLARE_ACCOUNT_ID` | 계정 ID |
 
-헤드리스 환경(CI 등)에서는 `wrangler login` 대신 `CLOUDFLARE_API_TOKEN`
-환경변수를 쓴다.
+워크플로우가 순서대로 하는 일:
+
+1. D1 `rungame`을 찾고, 없으면 만든다 (몇 번 돌려도 안전)
+2. 찾은 `database_id`를 `wrangler.jsonc`에 주입 — 러너의 체크아웃에만
+   적용되며 저장소에는 커밋하지 않는다
+3. `schema.sql` 적용 (전부 `IF NOT EXISTS`라 매번 돌려도 무해)
+4. `wrangler deploy`
+5. `SESSION_SECRET` 보장 — 없을 때만 랜덤 생성하고, 이미 있으면 건드리지 않는다
+6. 배포된 주소로 스모크 테스트
+
+`SESSION_SECRET`을 직접 정하고 싶으면 같은 이름의 저장소 시크릿을 추가하면
+그 값이 우선한다.
+
+> **키를 바꾸면 로그인된 모든 세션이 무효가 된다.** 그래서 워크플로우는
+> 기존 시크릿 목록을 확인하지 못하면 임의로 덮어쓰지 않고 그 자리에서
+> 실패한다.
+
+로컬에서 직접 배포하려면 `npx wrangler login` 후 위 과정을 손으로 하면 된다.
+
+### SESSION_SECRET이 없으면 어떻게 되나
+
+**프로덕션에서는 인증이 아예 동작하지 않는다.** 로그인·회원가입이 503을
+반환한다.
+
+고정 기본값으로 폴백하면 그 값이 이 저장소에 적혀 있으므로 누구나 세션을
+위조할 수 있다. 조용히 뚫리느니 눈에 띄게 고장나는 편이 낫다고 판단했다.
+`localhost`에서만 고정값을 쓴다.
 
 ## 조작
 

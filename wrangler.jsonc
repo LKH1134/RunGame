@@ -10,7 +10,10 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // SPA 폴백이 /api/* 까지 index.html로 삼켜버리지 않도록 명시한다.
+    // 이게 없으면 자산 라우팅 규칙에 따라 API가 조용히 HTML을 반환할 수 있다.
+    "run_worker_first": ["/api/*"]
   },
 
   "d1_databases": [

@@ -1,0 +1,167 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: ["claude/repo-permissions-check-4uic1i"]
+  workflow_dispatch:
+
+# 동시 배포가 겹치면 D1 스키마 적용과 deploy 순서가 꼬인다.
+concurrency:
+  group: cloudflare-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_NAME: rungame
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 시크릿 확인
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ]  || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::저장소 Actions 시크릿이 없습니다:$missing"
+            echo "Settings → Secrets and variables → Actions 에서 위 이름 그대로 추가하세요."
+            exit 1
+          fi
+          echo "시크릿 확인 완료"
+
+      # D1은 한 번만 만들면 되지만 워크플로우는 몇 번을 돌려도 안전해야 한다.
+      # 있으면 그대로 쓰고, 없을 때만 만든다.
+      - name: D1 데이터베이스 준비
+        id: d1
+        run: |
+          set -euo pipefail
+
+          find_uuid() {
+            npx wrangler d1 list --json 2>/dev/null | node -e '
+              let s = "";
+              process.stdin.on("data", d => s += d).on("end", () => {
+                let list = [];
+                try { list = JSON.parse(s || "[]"); } catch {}
+                const hit = (Array.isArray(list) ? list : []).find(d => d.name === process.env.D1_NAME);
+                process.stdout.write(hit ? String(hit.uuid || hit.id || "") : "");
+              });
+            '
+          }
+
+          uuid=$(find_uuid)
+          if [ -z "$uuid" ]; then
+            echo "'$D1_NAME' 없음 → 생성"
+            npx wrangler d1 create "$D1_NAME"
+            uuid=$(find_uuid)
+          fi
+
+          if [ -z "$uuid" ]; then
+            echo "::error::D1 database_id를 찾지 못했습니다."
+            exit 1
+          fi
+
+          echo "database_id=$uuid" >> "$GITHUB_OUTPUT"
+          echo "D1 준비 완료"
+
+      # wrangler.jsonc의 플레이스홀더를 실제 id로 바꾼다.
+      # 러너의 체크아웃에만 적용되며 저장소에는 커밋하지 않는다.
+      - name: wrangler.jsonc에 database_id 주입
+        env:
+          DB_ID: ${{ steps.d1.outputs.database_id }}
+        run: |
+          set -euo pipefail
+          sed -i "s|PLACEHOLDER_RUN_WRANGLER_D1_CREATE|${DB_ID}|" wrangler.jsonc
+          if grep -q PLACEHOLDER wrangler.jsonc; then
+            echo "::error::database_id 치환 실패"
+            exit 1
+          fi
+          echo "주입 완료"
+
+      # schema.sql은 전부 IF NOT EXISTS라 매 배포마다 돌려도 안전하다.
+      - name: D1 스키마 적용
+        run: npx wrangler d1 execute "$D1_NAME" --remote --file=./schema.sql --yes
+
+      - name: 배포
+        id: deploy
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[a-z0-9._-]+\.workers\.dev' deploy.log | head -1 || true)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "배포 주소: ${url:-(로그에서 찾지 못함)}"
+
+      # 세션 서명 키. 한 번 정해지면 바뀌면 안 된다 —
+      # 바꾸는 순간 로그인된 모든 세션이 전부 무효가 된다.
+      # 그래서 "없는 게 확실할 때"만 만들고, 판별에 실패하면 차라리 멈춘다.
+      - name: SESSION_SECRET 보장
+        env:
+          PROVIDED: ${{ secrets.SESSION_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${PROVIDED:-}" ]; then
+            printf '%s' "$PROVIDED" | npx wrangler secret put SESSION_SECRET
+            echo "저장소 시크릿 값으로 설정했습니다."
+            exit 0
+          fi
+
+          if ! listing=$(npx wrangler secret list 2>&1); then
+            echo "::error::기존 시크릿 목록을 확인할 수 없습니다. 임의로 덮어쓰면 모든 세션이 무효가 되므로 중단합니다."
+            echo "$listing"
+            exit 1
+          fi
+
+          if printf '%s' "$listing" | grep -q SESSION_SECRET; then
+            echo "이미 설정되어 있어 그대로 둡니다."
+          else
+            echo "없음 → 랜덤 생성 (사람이 알 필요 없는 값입니다)"
+            openssl rand -base64 48 | tr -d '\n' | npx wrangler secret put SESSION_SECRET
+          fi
+
+      - name: 배포 스모크 테스트
+        if: steps.deploy.outputs.url != ''
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          fail=0
+          chk() {
+            actual=$(curl -s -o /dev/null -w '%{http_code}' "$2")
+            if [ "$actual" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1 (기대=$3 실제=$actual)"; fail=1; fi
+          }
+          chk "index.html"      "$URL/"                  200
+          chk "게임 모듈"        "$URL/src/game/game.js"   200
+          chk "리더보드 공개"     "$URL/api/leaderboard"    200
+
+          # /api/* 가 SPA 폴백에 삼켜지지 않고 Worker에 닿는지 — JSON이어야 한다
+          ct=$(curl -s -o /dev/null -w '%{content_type}' "$URL/api/leaderboard")
+          case "$ct" in
+            application/json*) echo "  ok   API가 JSON 반환 ($ct)";;
+            *) echo "  FAIL API가 JSON이 아님: $ct"; fail=1;;
+          esac
+
+          # SESSION_SECRET 미설정이면 여기서 503이 나온다
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/api/auth/signin" \
+            -H 'Content-Type: application/json' -d '{"id":"__nobody__","password":"x"}')
+          if [ "$code" = "503" ]; then
+            echo "  FAIL SESSION_SECRET 미적용 (503)"; fail=1
+          else
+            echo "  ok   인증 엔드포인트 동작 (HTTP $code)"
+          fi
+
+          echo "배포 주소: $URL"
+          exit $fail

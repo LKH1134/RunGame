@@ -47,11 +47,11 @@ async function route(request, env, url) {
   // 배포(https)에서는 항상 Secure가 붙는다.
   const secure = url.protocol === 'https:';
 
-  if (path === '/api/auth/signup' && method === 'POST') return signup(request, env, secure);
-  if (path === '/api/auth/signin' && method === 'POST') return signin(request, env, secure);
+  if (path === '/api/auth/signup' && method === 'POST') return signup(request, env, secure, url);
+  if (path === '/api/auth/signin' && method === 'POST') return signin(request, env, secure, url);
   if (path === '/api/auth/signout' && method === 'POST') return signout(secure);
-  if (path === '/api/auth/me' && method === 'GET') return me(request, env);
-  if (path === '/api/scores' && method === 'POST') return submitScore(request, env);
+  if (path === '/api/auth/me' && method === 'GET') return me(request, env, url);
+  if (path === '/api/scores' && method === 'POST') return submitScore(request, env, url);
   if (path === '/api/leaderboard' && method === 'GET') return leaderboard(request, env, url);
 
   return json({ error: 'not_found', message: '없는 경로입니다.' }, 404);
@@ -81,7 +81,7 @@ function validatePassword(pw) {
   return null;
 }
 
-async function signup(request, env, secure) {
+async function signup(request, env, secure, url) {
   const body = await readJson(request);
   if (!body) return json({ error: 'bad_request', message: '요청이 올바르지 않습니다.' }, 400);
 
@@ -116,11 +116,12 @@ async function signup(request, env, secure) {
     json({ user: { uid: String(result.id), username: result.username } }),
     env,
     result.id,
-    secure
+    secure,
+    url
   );
 }
 
-async function signin(request, env, secure) {
+async function signin(request, env, secure, url) {
   const body = await readJson(request);
   if (!body) return json({ error: 'bad_request', message: '요청이 올바르지 않습니다.' }, 400);
 
@@ -147,7 +148,8 @@ async function signin(request, env, secure) {
     json({ user: { uid: String(row.id), username: row.username } }),
     env,
     row.id,
-    secure
+    secure,
+    url
   );
 }
 
@@ -160,16 +162,19 @@ function signout(secure) {
   return res;
 }
 
-async function me(request, env) {
-  const user = await currentUser(request, env);
+async function me(request, env, url) {
+  const user = await currentUser(request, env, url);
   return json({ user });
 }
 
-async function currentUser(request, env) {
+async function currentUser(request, env, url) {
   const token = readCookie(request, SESSION_COOKIE);
   if (!token) return null;
 
-  const userId = await readSessionToken(token, sessionSecret(env));
+  const secret = sessionSecret(env, url);
+  if (!secret) return null;
+
+  const userId = await readSessionToken(token, secret);
   if (!userId) return null;
 
   const row = await env.DB.prepare(`SELECT id, username FROM users WHERE id = ?`)
@@ -178,8 +183,10 @@ async function currentUser(request, env) {
   return row ? { uid: String(row.id), username: row.username } : null;
 }
 
-async function withSession(response, env, userId, secure) {
-  const token = await createSessionToken(userId, sessionSecret(env), SESSION_TTL_SEC);
+async function withSession(response, env, userId, secure, url) {
+  const secret = sessionSecret(env, url);
+  if (!secret) return SECRET_MISSING();
+  const token = await createSessionToken(userId, secret, SESSION_TTL_SEC);
   response.headers.append(
     'Set-Cookie',
     `${SESSION_COOKIE}=${token}; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_SEC}`
@@ -187,19 +194,36 @@ async function withSession(response, env, userId, secure) {
   return response;
 }
 
-function sessionSecret(env) {
+/**
+ * 세션 서명 키.
+ *
+ * 없을 때 고정 기본값으로 폴백하면 그 값이 이 저장소에 적혀 있으므로
+ * 누구나 세션을 위조할 수 있다. 그래서 프로덕션에서는 폴백하지 않고
+ * null을 돌려주고, 호출부가 503으로 막는다 — 조용히 뚫리느니
+ * 눈에 띄게 고장나는 편이 낫다.
+ *
+ * 로컬 개발(localhost)에서만 고정값을 쓴다.
+ */
+function sessionSecret(env, url) {
   if (env.SESSION_SECRET) return env.SESSION_SECRET;
-  // 배포 전에 반드시 설정해야 한다:
-  //   npx wrangler secret put SESSION_SECRET
-  // 없으면 세션 위조가 가능하므로 로컬 개발에서만 허용한다.
-  console.warn('SESSION_SECRET 미설정 — 개발용 기본값을 사용합니다. 배포 전 설정하세요.');
-  return 'dev-only-insecure-secret';
+
+  const host = url?.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') return 'dev-only-insecure-secret';
+
+  console.error('SESSION_SECRET 미설정 — 인증을 거부합니다. `wrangler secret put SESSION_SECRET` 필요.');
+  return null;
 }
+
+const SECRET_MISSING = () =>
+  json(
+    { error: 'server_misconfigured', message: '서버 설정이 완료되지 않았어요. 잠시 후 다시 시도해 주세요.' },
+    503
+  );
 
 // ── 점수 / 랭킹 ─────────────────────────────────────────────
 
-async function submitScore(request, env) {
-  const user = await currentUser(request, env);
+async function submitScore(request, env, url) {
+  const user = await currentUser(request, env, url);
   if (!user) {
     return json({ error: 'unauthorized', message: '로그인이 필요합니다.' }, 401);
   }
