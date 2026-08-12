@@ -1,5 +1,5 @@
-import { fetchLeaderboard } from '../firebase/scores.js';
-import { getCurrentUser } from '../firebase/auth.js';
+import { fetchLeaderboard } from '../api/scores.js';
+import { getCurrentUser } from '../api/auth.js';
 
 const el = (id) => document.getElementById(id);
 const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');

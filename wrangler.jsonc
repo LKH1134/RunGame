@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rungame",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-08-01",
+
+  // 정적 자산은 Worker 앞에서 처리된다. /api/* 처럼 매칭되는 파일이 없는
+  // 경로만 Worker로 들어오고, Worker는 그 외 경로를 ASSETS로 되돌린다.
+  // 프런트와 API가 같은 오리진이라 CORS 설정이 아예 필요 없다.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rungame",
+      // `npx wrangler d1 create rungame` 실행 후 출력된 UUID로 교체한다.
+      // 로컬(wrangler dev)은 이 값과 무관하게 .wrangler/state의 SQLite를 쓴다.
+      "database_id": "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

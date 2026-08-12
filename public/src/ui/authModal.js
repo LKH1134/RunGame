@@ -5,7 +5,7 @@ import {
   validateId,
   validatePassword,
   ID_HINT,
-} from '../firebase/auth.js';
+} from '../api/auth.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -104,7 +104,8 @@ async function onSubmit(e) {
     else await signIn(id, pw);
     closeAuthModal();
   } catch (err) {
-    setError(errorMessage(err.code));
+    // 서버가 내려준 한글 메시지를 우선 쓴다.
+    setError(errorMessage(err));
   } finally {
     setBusy(false);
   }

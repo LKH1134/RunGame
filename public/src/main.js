@@ -4,8 +4,8 @@ import { SCREEN, show, currentScreen } from './ui/screens.js';
 import * as hud from './ui/hud.js';
 import { initAuthModal, openAuthModal, isAuthModalOpen } from './ui/authModal.js';
 import { initLeaderboard, renderLeaderboard } from './ui/leaderboard.js';
-import { onUserChanged, getCurrentUser, signOut } from './firebase/auth.js';
-import { submitScore } from './firebase/scores.js';
+import { onUserChanged, getCurrentUser, signOut } from './api/auth.js';
+import { submitScore } from './api/scores.js';
 
 const el = (id) => document.getElementById(id);
 
@@ -80,8 +80,14 @@ async function handleResult(stats) {
     });
     if (!result.saved) hud.setSaveState('anonymous');
     else hud.setSaveState(result.isBest ? 'best' : 'saved');
-  } catch {
-    hud.setSaveState('error', '기록 저장에 실패했어요. 네트워크를 확인해 주세요.');
+  } catch (err) {
+    // 세션이 만료된 경우가 가장 흔하다 — 로그인 상태 표시도 되돌린다.
+    if (err?.status === 401) {
+      await signOut();
+      hud.setSaveState('anonymous');
+      return;
+    }
+    hud.setSaveState('error', err?.message || '기록 저장에 실패했어요.');
   }
 }
 
